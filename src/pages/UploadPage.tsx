@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Category, MediaType } from '../lib/types';
 import { saveArtwork, signInWithGoogle } from '../lib/firebase';
@@ -31,6 +31,9 @@ export const UploadPage: React.FC = () => {
   const [location, setLocation] = useState({ lat: 52.2053, lng: 0.1218 });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [isUploadingMedia, setIsUploadingMedia] = useState(false);
+  const [expiresIn24h, setExpiresIn24h] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     // Auto-login for demo
@@ -48,12 +51,47 @@ export const UploadPage: React.FC = () => {
     }
   }, []);
 
-  const handleMediaUpload = () => {
-    // Mock Cloudinary upload for demo
-    const url = prompt("Enter media URL (e.g., https://picsum.photos/800/600):", "https://picsum.photos/seed/newart/800/600");
-    if (url) {
-      setMediaUrl(url);
-      setMediaType(url.endsWith('.mp4') ? 'video' : url.endsWith('.mp3') ? 'audio' : 'image');
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingMedia(true);
+    try {
+      const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || 'demo';
+      if (CLOUDINARY_CLOUD_NAME === 'demo') {
+        // Fallback demo mock
+        const isVideo = file.type.startsWith('video/');
+        const isAudio = file.type.startsWith('audio/');
+        setTimeout(() => {
+          setMediaUrl(isVideo ? "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" : isAudio ? "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" : "https://picsum.photos/seed/newart/800/600");
+          setMediaType(isVideo ? 'video' : isAudio ? 'audio' : 'image');
+          setIsUploadingMedia(false);
+        }, 1500);
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('file', file);
+      // User must configure this upload preset in Cloudinary (Unsigned)
+      formData.append('upload_preset', 'galleryos_preset');
+
+      const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        throw new Error('Upload failed');
+      }
+
+      const data = await res.json();
+      setMediaUrl(data.secure_url);
+      setMediaType(file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : 'image');
+    } catch (err) {
+      console.error("Cloudinary upload error:", err);
+      alert("Media upload failed. Check Cloudinary settings and Upload Preset.");
+    } finally {
+      setIsUploadingMedia(false);
     }
   };
 
@@ -76,6 +114,7 @@ export const UploadPage: React.FC = () => {
         price: isPaid ? parseFloat(price) : undefined,
         likes: 0,
         createdAt: new Date(),
+        expiresAt: expiresIn24h ? new Date(Date.now() + 24 * 60 * 60 * 1000) : undefined,
         isActive: true
       });
       setShowSuccess(true);
@@ -94,7 +133,7 @@ export const UploadPage: React.FC = () => {
         </div>
         <h1 className="text-3xl font-heading font-bold text-white mb-4">Your art is live!</h1>
         <p className="text-text-secondary mb-8">It has been pinned to the world.</p>
-        <button 
+        <button
           onClick={() => navigate('/map')}
           className="bg-white text-black font-bold py-3 px-8 rounded-full hover:bg-gray-200 transition-colors"
         >
@@ -118,8 +157,8 @@ export const UploadPage: React.FC = () => {
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-bold text-text-secondary mb-2 uppercase tracking-wider">Title</label>
-            <input 
-              type="text" 
+            <input
+              type="text"
               value={title}
               onChange={e => setTitle(e.target.value)}
               className="w-full bg-surface border border-white/10 rounded-xl p-4 text-white focus:outline-none focus:border-accent transition-colors"
@@ -129,8 +168,8 @@ export const UploadPage: React.FC = () => {
           </div>
           <div>
             <label className="block text-sm font-bold text-text-secondary mb-2 uppercase tracking-wider">Artist</label>
-            <input 
-              type="text" 
+            <input
+              type="text"
               value={artistName}
               onChange={e => setArtistName(e.target.value)}
               className="w-full bg-surface border border-white/10 rounded-xl p-4 text-white focus:outline-none focus:border-accent transition-colors"
@@ -168,7 +207,7 @@ export const UploadPage: React.FC = () => {
               {mediaType === 'image' && <img src={mediaUrl} alt="Preview" className="w-full h-full object-cover" />}
               {mediaType === 'video' && <video src={mediaUrl} className="w-full h-full object-cover" controls />}
               {mediaType === 'audio' && <div className="w-full h-full flex items-center justify-center"><audio src={mediaUrl} controls /></div>}
-              <button 
+              <button
                 type="button"
                 onClick={() => setMediaUrl('')}
                 className="absolute top-2 right-2 bg-black/50 p-2 rounded-full text-white text-xs"
@@ -177,15 +216,25 @@ export const UploadPage: React.FC = () => {
               </button>
             </div>
           ) : (
-            <button
-              type="button"
-              onClick={handleMediaUpload}
-              className="w-full aspect-video bg-surface border-2 border-dashed border-white/20 rounded-xl flex flex-col items-center justify-center text-text-secondary hover:text-white hover:border-white/40 transition-colors"
-            >
-              <UploadIcon size={32} className="mb-2" />
-              <span>Tap to upload media</span>
-              <span className="text-xs opacity-50 mt-1">Image, Video, or Audio (Max 50MB)</span>
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploadingMedia}
+                className="w-full aspect-video bg-surface border-2 border-dashed border-white/20 rounded-xl flex flex-col items-center justify-center text-text-secondary hover:text-white hover:border-white/40 transition-colors disabled:opacity-50"
+              >
+                <UploadIcon size={32} className={clsx("mb-2", isUploadingMedia && "animate-bounce")} />
+                <span>{isUploadingMedia ? "Uploading to Cloudinary..." : "Tap to upload media"}</span>
+                <span className="text-xs opacity-50 mt-1">Image, Video, or Audio (Max 50MB)</span>
+              </button>
+              <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                accept="image/*,video/*,audio/*"
+                onChange={handleFileChange}
+              />
+            </>
           )}
         </div>
 
@@ -223,10 +272,10 @@ export const UploadPage: React.FC = () => {
           {isPaid && (
             <div className="flex items-center gap-2">
               <span className="text-xl text-text-secondary">£</span>
-              <input 
-                type="number" 
-                step="0.01" 
-                min="0.30" 
+              <input
+                type="number"
+                step="0.01"
+                min="0.30"
                 max="9.99"
                 value={price}
                 onChange={e => setPrice(e.target.value)}
@@ -236,7 +285,22 @@ export const UploadPage: React.FC = () => {
           )}
         </div>
 
-        <button 
+        {/* Expiry */}
+        <div className="flex items-center justify-between bg-surface border border-white/10 rounded-xl p-4">
+          <div>
+            <span className="font-bold text-white block">Ephemeral Art</span>
+            <span className="text-xs text-text-secondary">Disappears after 24 hours</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setExpiresIn24h(!expiresIn24h)}
+            className={clsx("w-12 h-6 rounded-full transition-colors relative", expiresIn24h ? "bg-accent" : "bg-white/10")}
+          >
+            <div className={clsx("absolute top-1 w-4 h-4 bg-white rounded-full transition-all", expiresIn24h ? "right-1" : "left-1")} />
+          </button>
+        </div>
+
+        <button
           type="submit"
           disabled={isSubmitting || !title || !mediaUrl}
           className="w-full bg-accent hover:bg-accent/90 disabled:bg-surface disabled:text-text-secondary text-white font-bold py-4 rounded-full transition-all active:scale-95 shadow-[0_0_20px_rgba(68,136,255,0.3)]"
