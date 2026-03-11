@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, onSnapshot, doc, getDoc, addDoc, updateDoc, increment, query, where } from 'firebase/firestore';
-import { getAuth, signInWithRedirect, getRedirectResult, GoogleAuthProvider } from 'firebase/auth';
+import { getAuth, signInWithPopup, GoogleAuthProvider, getRedirectResult } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
 import { Artwork } from './types';
 
@@ -93,7 +93,13 @@ export const saveArtwork = async (data: Omit<Artwork, 'id'>) => {
     listeners.forEach(l => l(mockArtworks));
     return newArtwork;
   }
-  return await addDoc(collection(db!, 'artworks'), data);
+  
+  // Firestore throws an error if any field is undefined. We must strip them.
+  const cleanData = Object.fromEntries(
+    Object.entries(data).filter(([_, v]) => v !== undefined)
+  );
+
+  return await addDoc(collection(db!, 'artworks'), cleanData);
 };
 
 export const incrementLikes = async (id: string) => {
@@ -112,9 +118,10 @@ export const signInWithGoogle = async () => {
   if (isDemo) return { user: { displayName: "Demo User", uid: "demo-user" } };
   const provider = new GoogleAuthProvider();
   try {
-    await signInWithRedirect(auth!, provider);
-  } catch (error) {
+    await signInWithPopup(auth!, provider);
+  } catch (error: any) {
     console.error('Sign in error:', error);
+    alert('Google Sign-In failed: ' + error.message);
   }
 };
 
